@@ -43,10 +43,7 @@ contexts:
   main:
     - include: unreal-type-macro
     - include: braces
-    - include: class-definition
-    - match: \bstruct\b
-      push: struct-definition
-    - include: declare-delegate
+    - include: generic
     - match: \b({{control_keywords}})\b
       scope: keyword.control.c++
 
@@ -88,6 +85,14 @@ contexts:
           1: entity.name.delegate
       - match: \)
         pop: true
+    - match: 'DECLARE_[[:alpha:]_]*EVENT_\w+'
+      scope: keyword
+      push:
+      - match: \(\s*[^,]+,\s*(\w+)
+        captures:
+          1: entity.name.delegate
+      - match: \)
+        pop: true
     - match: 'DECLARE_[[:alpha:]_]*DELEGATE(_\w+)?'
       scope: keyword
       push:
@@ -96,6 +101,7 @@ contexts:
           1: entity.name.delegate
       - match: \)
         pop: true
+
   strings:
     - include: c-strings
     - include: unique-strings
@@ -167,10 +173,35 @@ contexts:
   unreal-type-macro:
     - match: \bUCLASS\b
 
-  class-definition:
-    - match: '(?=(class)(\s*({{identifier}}))+\s*[;\*>])'
+  generic:
+    - include: template
+    - include: enum-declaration
+    - include: declare-delegate
+    - include: class-definition
+    - include: unreal-member-definition
+    - include: member-function-declaration
+
+  template:
+    - match: \btemplate\b
+      scope: keyword
+      push:
+        - match: <
+          set: template-angle-bracket
+  
+  template-angle-bracket:
+    - match: <
+      push: template-angle-bracket
+    - match: \>
       pop: true
-    - match: '(class)(\s*({{identifier}}))+\s*'
+
+
+  class-definition:
+    - match: '(?=(class|struct)(\s*({{identifier}}))+\s*([;\*>\(&]|:[0-9+]))'
+      push:
+        - match: (class|struct)
+          scope: keyword
+          pop: true
+    - match: '(class|struct)(\s*({{identifier}}))+\s*'
       captures:
         1: keyword
         3: entity.name.class
@@ -185,44 +216,95 @@ contexts:
   class-open-bracket:
     - match: \{
       push: class-open-bracket
-    - include: declare-delegate
-    - include: unreal-member-definition
-    - include: member-function-declaration
-    - include: class-definition
+    - include: generic
+    - match: \}
+      pop: true
+
+  enum-declaration:
+    - match: \benum\b
+      scope: keyword
+      push:
+        - match: \bclass\b
+          scope: keyword
+        - match: '{{identifier}}'
+          scope: entity.name.enum
+        - match: \{
+          push: enum-declaration-bracket
+        - match: ;
+          pop: true
+    - match: '(namespace)\s+(E[[:alnum:]_]+)'
+      scope: keyword
+      captures:
+        1: keyword
+        2: entity.name.enum
+      push:
+      - match: \{
+        push:
+        - match: enum\s+Type
+        - match: \{
+          push: enum-declaration-bracket
+        - match: ;
+          pop: true
+      - match: \}
+        pop: true
+
+
+  enum-declaration-bracket:
+    - meta_scope: meta.enum
+    - match: \{
+      push: enum-declaration-bracket
+    - match: '{{identifier}}'
+      scope: entity.name.enum.value
+      push:
+        - match: UMETA
+          push:
+          - match: \(
+            set: unreal-macro-meta
+        - match: ','
+          pop: true
+        - match: (?=\})
+          pop: true
     - match: \}
       pop: true
 
   member-function-declaration:
-    - match: '{{identifier}}'
+    - match: '{{modifiers}}'
+      scope: keyword
+    - match: \(
+      push: member-function-declaration-parenthesis
+    - match: '{{identifier}}\s*'
       push:
       - include: angle-brackets
       - match: '[*&]'
-      - match: (?!\s+({{identifier}})\s*\()
+      - match: (?=\s*({{identifier}})\s*(:\s*[0-9]+)?;)
+        set:
+          - match: \s*({{identifier}})\s*(:\s*[0-9]+)?;
+            captures:
+              1: entity.name.property
+            pop: true
+      - match: (?!\s*({{identifier}})\s*\()
         pop: true
-      - match: (?=\s+({{identifier}})\s*\()
+      - match: (?=\s*({{identifier}})\s*\()
         set:
           - match: '{{identifier}}'
             scope: entity.name.function
             set:
-            - include: member-function-declaration-parenthesis-inner
+            - match: \(
+              push: member-function-declaration-parenthesis
             - match: \{
-              set: member-function-declaration-brace-inner
+              set: member-function-declaration-brace
             - match: ;
               pop: true
 
+
   member-function-declaration-parenthesis:
     - match: \(
-      set: member-function-declaration-parenthesis-inner
-  member-function-declaration-parenthesis-inner:
-    # - meta_scope: keyword
-    - match: \(
-      push: member-function-declaration-parenthesis-inner
+      push: member-function-declaration-parenthesis
     - match: \)
       pop: true
-  member-function-declaration-brace-inner:
-    # - meta_scope: keyword
+  member-function-declaration-brace:
     - match: \{
-      push: member-function-declaration-brace-inner
+      push: member-function-declaration-brace
     - match: \}
       pop: true
 
@@ -230,7 +312,7 @@ contexts:
     - match: '<(?!<)'
       scope: punctuation.section.generic.begin.c++
       push:
-        - match: '>'
+        - match: '>\s*[*&]*'
           scope: punctuation.section.generic.end.c++
           pop: true
         - include: expressions-minus-generic-type-function-call
@@ -259,49 +341,34 @@ contexts:
   unreal-member-function:
     - match: \bUFUNCTION\b
       scope: keyword
-      push: unreal-member-function-meta
+      push:
+      - match: \(
+        set: unreal-member-function-meta
 
   unreal-member-function-meta:
-    - match: \(
-      set: unreal-member-function-meta-inner
-  unreal-member-function-meta-inner:
     - meta_scope: meta.unreal.function
     - match: \(
-      push: unreal-member-function-meta-inner
+      push: unreal-member-function-meta
     - match: \)
       pop: true
     - match: DisplayName\s*=\s*"([^"]+)"
       captures:
         1: entity.name.display
 
-
   unreal-member-property:
     - match: \bUPROPERTY\b
       scope: keyword
-      push: unreal-member-property-meta
+      push:
+        - meta_scope: meta.unreal.property
+        - match: \(
+          set: unreal-macro-meta
 
-  unreal-member-property-meta:
+  unreal-macro-meta:
     - match: \(
-      set: unreal-member-property-meta-inner
-  unreal-member-property-meta-inner:
-    - meta_scope: meta.unreal.property
-    - match: \(
-      push: unreal-member-property-meta-inner
+      push: unreal-macro-meta
     - match: \)
       pop: true
     - match: DisplayName\s*=\s*"([^"]+)"
       captures:
         1: entity.name.display
       
-
-  struct-definition:
-    - match: \{
-      push: struct-open-bracket
-    - match: ;
-      pop: true
-
-  struct-open-bracket:
-    - match: \{
-      push: struct-open-bracket
-    - match: \}
-      pop: true
