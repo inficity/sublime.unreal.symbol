@@ -1,0 +1,13 @@
+%YAML 1.2
+---
+name: unreal build
+
+scope: output.unreal
+contexts:
+  main:
+    - match: '^([^:].+)\((\d+)\):\s+warning.+'
+      scope: string
+    - match: '^([^:].+)\((\d+)\):\s+error.+'
+      scope: keyword
+    - match: 'Total build time[^\(]+'
+      scope: entity.name
